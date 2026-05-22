@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: symetry-whacamole
+    env: static
+    buildCommand: ""
+    staticPublishPath: .
