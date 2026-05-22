@@ -403,22 +403,28 @@ function getHole(i){ return document.getElementById('whac-grid').children[i]; }
 
 // ── MOLE SPAWNING ──
 function getSpawnDelay(){
-  const base = frenzyActive ? 200 : 600;
-  return base + Math.random() * (frenzyActive ? 300 : 700);
+  // Normal: 1.5s–3.5s between moles per hole. Frenzy: 600ms–1.2s
+  const base = frenzyActive ? 600 : 1500;
+  const extra = frenzyActive ? 600 : 2000;
+  return base + Math.random() * extra;
 }
 function getVisibleDur(){
-  const base = frenzyActive ? 400 : 900;
-  return base + Math.random() * (frenzyActive ? 300 : 600);
+  // Normal: 1.8s–3s visible. Frenzy: 700ms–1.2s
+  const base = frenzyActive ? 700 : 1800;
+  const extra = frenzyActive ? 500 : 1200;
+  return base + Math.random() * extra;
 }
 
-function scheduleMole(idx){
+// Central reschedule — always called to keep hole alive
+function rescheduleHole(idx){
   if(holeTimers[idx]) clearTimeout(holeTimers[idx]);
-  const delay = getSpawnDelay() + Math.random()*400;
-  holeTimers[idx] = setTimeout(()=>showMole(idx), delay);
+  holeTimers[idx] = setTimeout(()=> showMole(idx), getSpawnDelay());
 }
 
 function showMole(idx){
-  if(holeActive[idx]) return;
+  // Safety: don't show if already active
+  if(holeActive[idx]){ rescheduleHole(idx); return; }
+
   const mole = WM.pickMoleType(frenzyActive);
   holeMole[idx] = mole;
   holeActive[idx] = true;
@@ -426,34 +432,35 @@ function showMole(idx){
   const hole = getHole(idx);
   hole.className = 'hole '+mole.type;
   const inner = hole.querySelector('.hole-inner');
-  const img   = inner.querySelector('img');
 
   if(mole.type === 'trap'){
-    inner.textContent = '💣';
+    inner.innerHTML = '<span style="font-size:2rem;display:flex;align-items:center;justify-content:center;height:100%;">💣</span>';
   } else {
-    inner.textContent = '';
-    inner.appendChild(img);
     const faceIdx = FACE_FOR_TYPE[mole.type];
-    img.src = MOLE_IMGS[faceIdx] || MOLE_IMGS[0];
+    inner.innerHTML = `<img src="${MOLE_IMGS[faceIdx]||MOLE_IMGS[0]}" alt="mole" style="width:100%;height:100%;object-fit:cover;border-radius:50% 50% 0 0;display:block;">`;
   }
 
   // Pop up
   requestAnimationFrame(()=> requestAnimationFrame(()=> hole.classList.add('active')));
 
-  // Auto-hide
-  holeTimers[idx] = setTimeout(()=> hideMole(idx, false), getVisibleDur());
+  // Auto-hide after visible duration — then reschedule
+  if(holeTimers[idx]) clearTimeout(holeTimers[idx]);
+  holeTimers[idx] = setTimeout(()=> hideMole(idx), getVisibleDur());
 }
 
-function hideMole(idx, wasHit){
+function hideMole(idx){
+  if(holeTimers[idx]){ clearTimeout(holeTimers[idx]); holeTimers[idx]=null; }
   const hole = getHole(idx);
   hole.classList.remove('active');
-  holeActive[idx] = false;
-  holeMole[idx] = null;
 
-  if(!wasHit){
-    // Reschedule
-    holeTimers[idx] = setTimeout(()=> showMole(idx), getSpawnDelay());
-  }
+  // Wait for slide-down animation then reset
+  setTimeout(()=>{
+    hole.className = 'hole';
+    holeActive[idx] = false;
+    holeMole[idx] = null;
+    // Always reschedule — this is the only exit point
+    rescheduleHole(idx);
+  }, 200);
 }
 
 // ── HIT HANDLER ──
@@ -471,9 +478,9 @@ function handleHit(idx){
   sessionReturned = parseFloat((sessionReturned + result.payout).toFixed(2));
   save(); updateUI();
 
-  // Visual feedback
+  // Visual feedback — cancel auto-hide timer, handle manually
+  if(holeTimers[idx]){ clearTimeout(holeTimers[idx]); holeTimers[idx]=null; }
   const hole = getHole(idx);
-  hideMole(idx, true);
 
   if(result.won){
     hole.classList.add('hit-win');
@@ -485,7 +492,6 @@ function handleHit(idx){
     playSound('trap');
     spawnFloatLabel(hole, '-'+fmtDec(chipValue), 'trap');
   }
-  setTimeout(()=>{ hole.classList.remove('hit-win','hit-lose'); hole.className='hole'; }, 400);
 
   // Status
   if(mole.type==='legend') setStatus(t('legend'),'win');
@@ -493,8 +499,15 @@ function handleHit(idx){
   else if(mole.type==='trap') setStatus(t('trap'),'loss');
   else setStatus(result.won?'✦ ×'+mole.gross.toFixed(2):'','win');
 
-  // Reschedule this hole
-  holeTimers[idx] = setTimeout(()=>showMole(idx), getSpawnDelay());
+  // Slide down then reschedule — use hideMole which always reschedules
+  hole.classList.remove('active');
+  setTimeout(()=>{
+    hole.classList.remove('hit-win','hit-lose');
+    hole.className='hole';
+    holeActive[idx]=false;
+    holeMole[idx]=null;
+    rescheduleHole(idx);
+  }, 250);
 
   // Frenzy check
   if(!frenzyActive && !frenzyUsed){
@@ -543,9 +556,9 @@ function endFrenzy(){
 // ── GAME START ──
 function startGame(){
   buildGrid();
-  // Stagger initial mole spawns
+  // Stagger initial spawns — spread over 4 seconds so not all appear at once
   for(let i=0;i<HOLES;i++){
-    holeTimers[i]=setTimeout(()=>showMole(i), 300 + i*120 + Math.random()*300);
+    holeTimers[i]=setTimeout(()=>showMole(i), 500 + i*200 + Math.random()*500);
   }
 }
 
